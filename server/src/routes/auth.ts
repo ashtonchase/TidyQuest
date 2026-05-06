@@ -1,0 +1,242 @@
+import { Router, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import db from '../database';
+import { AuthRequest, authMiddleware, generateToken } from '../middleware/auth';
+
+// Simple in-memory rate limiter for auth endpoints
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = 20; // max attempts per window
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || entry.resetAt < now) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false;
+  entry.count++;
+  return true;
+}
+
+// Periodically purge expired entries to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts.entries()) {
+    if (entry.resetAt < now) loginAttempts.delete(key);
+  }
+}, RATE_LIMIT_WINDOW_MS);
+
+const router = Router();
+
+router.post('/register', (req: AuthRequest, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many registration attempts. Please try again later.' });
+  }
+
+  const { username, password, displayName, avatarColor, language } = req.body;
+
+  if (!username || !password || !displayName) {
+    return res.status(400).json({ error: 'username, password, and displayName are required' });
+  }
+
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+
+  // Block registration if disabled by admin — unless this is the very first user
+  if (userCount.count > 0) {
+    const regEnabled = (db.prepare("SELECT value FROM app_settings WHERE key = 'registrationEnabled'").get() as { value: string } | undefined)?.value;
+    if (regEnabled === '0') {
+      return res.status(403).json({ error: 'Registration is currently disabled by the administrator.' });
+    }
+  }
+
+  const existing = db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username);
+  if (existing) {
+    return res.status(409).json({ error: 'Username already taken' });
+  }
+
+  const role = userCount.count === 0 ? 'admin' : 'member';
+
+  const passwordHash = bcrypt.hashSync(password, 10);
+  const result = db.prepare(
+    'INSERT INTO users (username, displayName, passwordHash, role, avatarColor, language) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(username, displayName, passwordHash, role, avatarColor || '#F97316', language || 'en');
+
+  const token = generateToken(result.lastInsertRowid as number);
+  const user = db.prepare('SELECT id, username, displayName, role, avatarColor, avatarType, avatarPreset, avatarPhotoUrl, coins, currentStreak, goalCoins, goalStartAt, goalEndAt, language FROM users WHERE id = ?')
+    .get(result.lastInsertRowid) as any;
+  user.points = 0;
+
+  res.status(201).json({ token, user });
+});
+
+router.get('/registration-status', (_req: AuthRequest, res: Response) => {
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'registrationEnabled'").get() as { value: string } | undefined;
+  const registrationEnabled = row ? row.value !== '0' : true;
+  res.json({ registrationEnabled });
+});
+
+router.get('/avatars', (_req: AuthRequest, res: Response) => {
+  const users = db.prepare(
+    'SELECT username, displayName, avatarColor, avatarType, avatarPreset, avatarPhotoUrl, passwordless FROM users ORDER BY displayName'
+  ).all();
+  res.json(users);
+});
+
+router.post('/login', (req: AuthRequest, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+  }
+
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password are required' });
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').get(username) as any;
+  if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  const token = generateToken(user.id);
+  const { passwordHash, ...safeUser } = user;
+  
+  const pointsRow = db.prepare(
+    "SELECT COALESCE(SUM(coinsEarned), 0) as points FROM task_completions WHERE userId = ? AND status = 'approved'"
+  ).get(user.id) as any;
+  safeUser.points = pointsRow?.points ?? 0;
+  res.json({ token, user: safeUser });
+
+});
+
+// Passwordless login - direct login without PIN
+router.post('/login-passwordless', (req: AuthRequest, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+  }
+
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+
+  const user = db.prepare('SELECT id, username, displayName, passwordless FROM users WHERE username = ? COLLATE NOCASE').get(username) as any;
+  
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+
+  if (user.passwordless !== 1) {
+    return res.status(400).json({ error: 'User requires password login' });
+  }
+
+  // Direct login for passwordless users - generate JWT immediately
+  const token = generateToken(user.id);
+  const { passwordHash, ...safeUser } = user;
+  
+  const pointsRow = db.prepare(
+    "SELECT COALESCE(SUM(coinsEarned), 0) as points FROM task_completions WHERE userId = ? AND status = 'approved'"
+  ).get(user.id) as any;
+  safeUser.points = pointsRow?.points ?? 0;
+  res.json({ token, user: safeUser });
+});
+
+// PIN login - complete authentication
+router.post('/login-pin', (req: AuthRequest, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+  }
+
+  const { username, pin } = req.body;
+
+  if (!username || !pin) {
+    return res.status(400).json({ error: 'username and pin are required' });
+  }
+
+  if (pin.length !== 6) {
+    return res.status(400).json({ error: 'Invalid PIN format' });
+  }
+
+  const user = db.prepare('SELECT id, username, displayName, passwordless, avatarPreset, avatarPhotoUrl FROM users WHERE username = ? COLLATE NOCASE').get(username) as any;
+  
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+
+  if (user.passwordless !== 1) {
+    return res.status(400).json({ error: 'User requires password login' });
+  }
+
+  const pinHash = user.avatarPreset;
+  const expiresAt = user.avatarPhotoUrl;
+
+  if (!pinHash || !expiresAt) {
+    return res.status(400).json({ error: 'No PIN set. Please ask an admin to generate a PIN.' });
+  }
+
+  if (new Date(expiresAt).getTime() < Date.now()) {
+    return res.status(400).json({ error: 'PIN expired. Please ask an admin to generate a new PIN.' });
+  }
+
+  if (!bcrypt.compareSync(pin, pinHash)) {
+    return res.status(401).json({ error: 'Invalid PIN' });
+  }
+
+  const token = generateToken(user.id);
+  const { passwordHash, ...safeUser } = user;
+  
+  const pointsRow = db.prepare(
+    "SELECT COALESCE(SUM(coinsEarned), 0) as points FROM task_completions WHERE userId = ? AND status = 'approved'"
+  ).get(user.id) as any;
+  safeUser.points = pointsRow?.points ?? 0;
+  res.json({ token, user: safeUser });
+});
+
+router.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
+  const user = db.prepare(
+    'SELECT id, username, displayName, role, avatarColor, avatarType, avatarPreset, avatarPhotoUrl, coins, currentStreak, goalCoins, goalStartAt, goalEndAt, lastActiveDate, isVacationMode, language, createdAt FROM users WHERE id = ?'
+  ).get(req.userId) as any;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  const pointsRow = db.prepare(
+    "SELECT COALESCE(SUM(coinsEarned), 0) as points FROM task_completions WHERE userId = ? AND status = 'approved'"
+  ).get(req.userId) as any;
+  user.points = pointsRow?.points ?? 0;
+  res.json(user);
+});
+
+// Toggle passwordless login mode for a user (admin only)
+router.put('/users/:id/passwordless', authMiddleware, (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { passwordless } = req.body;
+
+  // Only admins can toggle passwordless mode
+  const user = db.prepare('SELECT role FROM users WHERE id = ?').get(req.userId) as any;
+  if (!user || user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin privileges required' });
+  }
+
+  // Validate input
+  if (passwordless !== 0 && passwordless !== 1) {
+    return res.status(400).json({ error: 'passwordless must be 0 or 1' });
+  }
+
+  // Update the user's passwordless flag
+  const result = db.prepare('UPDATE users SET passwordless = ? WHERE id = ?').run(passwordless, id);
+  
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  res.json({ success: true });
+});
+
+export default router;

@@ -1,0 +1,13 @@
+services:
+  tidyquest:
+    image: mellowfox/tidyquest:latest
+    container_name: tidyquest
+    ports:
+      - "3020:3000"
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=eXTPkwZY+J8XOblvIOVhVh5QizmvtOyESxokqJViHsU=
+      - TZ=America/Chicago
+    volumes:
+      - ./data:/app/data:z
+    restart: unless-stopped
