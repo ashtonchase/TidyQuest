@@ -68,6 +68,7 @@ interface SettingsProps {
   onAdjustCoins?: (userId: number, amount: number) => Promise<void>;
   gamificationEnabled?: boolean;
   onGamificationChange?: (enabled: boolean) => void;
+  onRefreshFamily?: () => void;
 }
 
 const COLORS = ['#F97316', '#9B72CF', '#4AABDE', '#5CB85C', '#D4A017', '#E25A5A', '#38BDF8', '#EC4899'];
@@ -92,6 +93,7 @@ export function Settings({
   onAdjustCoins,
   gamificationEnabled = true,
   onGamificationChange,
+  onRefreshFamily,
 }: SettingsProps) {
   const { t } = useTranslation(user.language);
   const isAdmin = user.role === 'admin';
@@ -109,6 +111,8 @@ export function Settings({
   const [rewardRequests, setRewardRequests] = useState<Array<{ id: number; title: string; displayName: string; costCoins: number; redeemedAt: string; status: string }>>([]);
   const [rewardDraft, setRewardDraft] = useState({ title: '', description: '', costCoins: '30' });
   const [editingRewardId, setEditingRewardId] = useState<number | null>(null);
+  const [editingRewardTitle, setEditingRewardTitle] = useState('');
+  const [editingRewardDesc, setEditingRewardDesc] = useState('');
   const [editingRewardCost, setEditingRewardCost] = useState('');
   const [memberProfile, setMemberProfile] = useState<Record<number, {
     language: string;
@@ -368,24 +372,29 @@ export function Settings({
     await loadRewardsAdmin();
   };
 
-  const startRewardEdit = (r: { id: number; costCoins: number }) => {
+  const startRewardEdit = (r: { id: number; title: string; description?: string | null; costCoins: number }) => {
     setEditingRewardId(r.id);
+    setEditingRewardTitle(r.title);
+    setEditingRewardDesc(r.description || '');
     setEditingRewardCost(String(r.costCoins));
   };
 
   const cancelRewardEdit = () => {
     setEditingRewardId(null);
+    setEditingRewardTitle('');
+    setEditingRewardDesc('');
     setEditingRewardCost('');
   };
 
-  const saveRewardEdit = async (r: { id: number; title: string; description?: string | null; isActive?: boolean }) => {
+  const saveRewardEdit = async (r: { id: number }) => {
     const parsed = Math.max(1, Math.round(Number(editingRewardCost)));
     if (!Number.isFinite(parsed)) return;
+    if (!editingRewardTitle.trim()) return;
     await api.updateReward(r.id, {
-      title: r.title,
-      description: r.description || '',
+      title: editingRewardTitle.trim(),
+      description: editingRewardDesc.trim() || '',
       costCoins: parsed,
-      isActive: r.isActive !== false,
+      isActive: true,
     });
     cancelRewardEdit();
     await loadRewardsAdmin();
@@ -889,47 +898,6 @@ export function Settings({
                   />
                   <button className="tq-btn tq-btn-secondary tq-btn-sm" onClick={() => handleAddGoal(u)}>{t('settings.addGoal')}</button>
                 </div>
-                
-                {/* Passwordless and Display Mode toggles */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '8px 10px', borderRadius: 8, backgroundColor: 'var(--warm-bg-warm)', border: '1px solid var(--warm-border)' }}>
-                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                    <path d="M10 2a4 4 0 0 1 4 4v1h1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1V6A4 4 0 0 1 10 2z" fill="var(--warm-text-light)" />
-                  </svg>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--warm-text)' }}>{t('settings.passwordlessLogin')}</div>
-                    <div style={{ fontSize: 11, color: 'var(--warm-text-light)', fontWeight: 600 }}>{t('settings.passwordlessLoginDesc')}</div>
-                  </div>
-                  <Toggle
-                    checked={u.passwordless === 1}
-                    onChange={async (val) => {
-                      try {
-                        await api.updatePasswordless(u.id, { passwordless: val ? 1 : 0 });
-                      } catch {
-                        // Revert on error
-                      }
-                    }}
-                  />
-                </div>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, padding: '8px 10px', borderRadius: 8, backgroundColor: 'var(--warm-bg-warm)', border: '1px solid var(--warm-border)' }}>
-                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                    <path d="M10 1l2.5 5.5L18 7.5l-4 4 1 5.5L10 14.5 4.5 17l1-5.5-4-4 5.5-1z" fill="var(--warm-text-light)" />
-                  </svg>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--warm-text)' }}>{t('settings.displayMode')}</div>
-                    <div style={{ fontSize: 11, color: 'var(--warm-text-light)', fontWeight: 600 }}>{t('settings.displayModeDesc')}</div>
-                  </div>
-                  <Toggle
-                    checked={u.displayMode === 1}
-                    onChange={async (val) => {
-                      try {
-                        await api.updateDisplayMode(u.id, { displayMode: val ? 1 : 0 });
-                      } catch {
-                        // Revert on error
-                      }
-                    }}
-                  />
-                </div>
               </div>
             ))}
           </div>
@@ -950,8 +918,35 @@ export function Settings({
           <div style={{ display: 'grid', gap: 6 }}>
             {rewardsAdmin.map((r) => (
               <div key={r.id} className="rewards-list-row" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 100px auto', gap: 8, alignItems: 'center', border: '1px solid var(--warm-border)', borderRadius: 10, padding: '8px 10px', backgroundColor: r.isActive ? 'var(--warm-bg-subtle)' : 'var(--warm-bg-warm)' }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--warm-text)' }}>{rewardTitle(r)}</div>
-                <div style={{ fontSize: 11, color: 'var(--warm-text-light)', fontWeight: 600 }}>{rewardDesc(r)}</div>
+                {editingRewardId === r.id ? (
+                  <>
+                    <input
+                      className="tq-input"
+                      value={editingRewardTitle}
+                      onChange={(e) => setEditingRewardTitle(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') await saveRewardEdit(r);
+                        if (e.key === 'Escape') cancelRewardEdit();
+                      }}
+                      style={{ fontSize: 12, fontWeight: 800 }}
+                    />
+                    <input
+                      className="tq-input"
+                      value={editingRewardDesc}
+                      onChange={(e) => setEditingRewardDesc(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') await saveRewardEdit(r);
+                        if (e.key === 'Escape') cancelRewardEdit();
+                      }}
+                      style={{ fontSize: 11 }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--warm-text)' }}>{rewardTitle(r)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--warm-text-light)', fontWeight: 600 }}>{rewardDesc(r)}</div>
+                  </>
+                )}
                 {editingRewardId === r.id ? (
                   <input
                     type="number"
@@ -1101,6 +1096,32 @@ export function Settings({
                   >
                     {t('settings.deleteUser')}
                   </button>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                    <Toggle
+                      checked={u.passwordless === 1}
+                      onChange={async (val) => {
+                        try {
+                          await api.updatePasswordless(u.id, { passwordless: val ? 1 : 0 });
+                          onRefreshFamily?.();
+                        } catch {
+                          // Revert on error
+                        }
+                      }}
+                    />
+                    <span style={{ fontSize: 10, color: 'var(--warm-text-light)', fontWeight: 600, alignSelf: 'center' }}>{t('settings.passwordless')}</span>
+                    <Toggle
+                      checked={u.displayMode === 1}
+                      onChange={async (val) => {
+                        try {
+                          await api.updateDisplayMode(u.id, { displayMode: val ? 1 : 0 });
+                          onRefreshFamily?.();
+                        } catch {
+                          // Revert on error
+                        }
+                      }}
+                    />
+                    <span style={{ fontSize: 10, color: 'var(--warm-text-light)', fontWeight: 600, alignSelf: 'center' }}>{t('settings.displayMode')}</span>
+                  </div>
                 </div>
               )}
               {isAdmin && u.role !== 'admin' && memberEditOpen[u.id] && (
