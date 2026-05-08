@@ -11,6 +11,8 @@ interface LoginUser {
   avatarType: string;
   avatarPreset?: string;
   avatarPhotoUrl?: string;
+  passwordless?: number;
+  displayMode?: number;
 }
 
 interface LoginProps {

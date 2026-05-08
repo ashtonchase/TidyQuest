@@ -15,6 +15,8 @@ export interface User {
   points: number;
   isVacationMode: boolean;
   language: string;
+  passwordless?: number;
+  displayMode?: number;
 }
 
 export function useAuth() {
