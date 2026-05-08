@@ -475,6 +475,10 @@ function AppContent() {
                   await api.adjustCoins(userId, amount);
                   setFamilySettings(await api.getUsers());
                 }}
+                onRefreshFamily={async () => {
+                  setFamilySettings(await api.getUsers());
+                  await refreshUser();
+                }}
               />
             </>
           } />
