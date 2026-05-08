@@ -4,7 +4,7 @@ import de from '../i18n/de.json';
 import es from '../i18n/es.json';
 import it from '../i18n/it.json';
 
-type TranslationData = typeof en;
+type TranslationData = Record<string, unknown>;
 
 const translations: Record<string, TranslationData> = { en, fr, de, es, it };
 
