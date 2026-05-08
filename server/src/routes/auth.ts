@@ -175,7 +175,7 @@ router.put('/users/:id/passwordless', authMiddleware, (req: AuthRequest, res: Re
     return res.status(400).json({ error: 'passwordless must be 0 or 1' });
   }
 
-  const result = db.prepare('UPDATE users SET passwordless = ? WHERE id = ?').run(passwordless, id);
+  const result = db.prepare('UPDATE users SET passwordless = ? WHERE id = ?').run(passwordless ? 1 : 0, parseInt(id, 10));
   
   if (result.changes === 0) {
     return res.status(404).json({ error: 'User not found' });
