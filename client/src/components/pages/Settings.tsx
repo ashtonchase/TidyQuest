@@ -25,6 +25,7 @@ interface FamilyUser {
   isVacationMode?: number;
   vacationStartDate?: string | null;
   vacationEndDate?: string | null;
+  passwordless?: number;
 }
 
 interface VacationConfig {
@@ -886,6 +887,25 @@ export function Settings({
                       style={{ minWidth: 0 }}
                     />
                     <button className="tq-btn tq-btn-secondary tq-btn-sm" onClick={() => handleAddGoal(u)}>{t('settings.addGoal')}</button>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '8px 10px', borderRadius: 8, backgroundColor: 'var(--warm-bg-warm)', border: '1px solid var(--warm-border)' }}>
+                    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                      <path d="M10 2a4 4 0 0 1 4 4v1h1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1V6A4 4 0 0 1 10 2z" fill="var(--warm-text-light)" />
+                    </svg>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--warm-text)' }}>{t('settings.passwordlessLogin')}</div>
+                      <div style={{ fontSize: 11, color: 'var(--warm-text-light)', fontWeight: 600 }}>{t('settings.passwordlessLoginDesc')}</div>
+                    </div>
+                    <Toggle
+                      checked={u.passwordless === 1}
+                      onChange={async (val) => {
+                        try {
+                          await api.updatePasswordless(u.id, { passwordless: val ? 1 : 0 });
+                        } catch {
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               ))}

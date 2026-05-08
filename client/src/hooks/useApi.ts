@@ -229,4 +229,9 @@ export const api = {
     apiFetch<{ strictMode: boolean }>('/users/strict-mode-config'),
   updateStrictModeConfig: (data: { strictMode: boolean }) =>
     apiFetch<{ strictMode: boolean }>('/users/strict-mode-config', { method: 'PUT', body: JSON.stringify(data) }),
+
+  loginPasswordless: (username: string) =>
+    apiFetch<{ token: string; user: any }>('/auth/login-passwordless', { method: 'POST', body: JSON.stringify({ username }) }),
+  updatePasswordless: (userId: number, data: { passwordless: number }) =>
+    apiFetch<{ success: boolean }>(`/auth/users/${userId}/passwordless`, { method: 'PUT', body: JSON.stringify(data) }),
 };

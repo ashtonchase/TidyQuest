@@ -161,6 +161,8 @@
       "vacationReturnDate": "Return date",
       "strictMode": "Strict Mode",
       "strictModeDesc": "Require parent admin approval when a child marks a task as done.",
+      "passwordlessLogin": "Passwordless Login",
+      "passwordlessLoginDesc": "Children can log in without a password by clicking their avatar.",
       "registrationEnabled": "Allow New Registrations",
       "registrationEnabledDesc": "When disabled, no new accounts can be created from the registration page.",
       "gamificationEnabled": "Gamification",

@@ -80,7 +80,7 @@ router.get('/registration-status', (_req: AuthRequest, res: Response) => {
 
 router.get('/avatars', (_req: AuthRequest, res: Response) => {
   const users = db.prepare(
-    'SELECT username, displayName, avatarColor, avatarType, avatarPreset, avatarPhotoUrl FROM users ORDER BY displayName'
+    'SELECT username, displayName, avatarColor, avatarType, avatarPreset, avatarPhotoUrl, passwordless FROM users ORDER BY displayName'
   ).all();
   res.json(users);
 });
@@ -113,6 +113,39 @@ router.post('/login', (req: AuthRequest, res: Response) => {
 
 });
 
+// Passwordless login - direct login without password
+router.post('/login-passwordless', (req: AuthRequest, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+  }
+
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+
+  const user = db.prepare('SELECT id, username, displayName, passwordless FROM users WHERE username = ? COLLATE NOCASE').get(username) as any;
+  
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+
+  if (user.passwordless !== 1) {
+    return res.status(400).json({ error: 'User requires password login' });
+  }
+
+  const token = generateToken(user.id);
+  const { passwordHash, ...safeUser } = user;
+  
+  const pointsRow = db.prepare(
+    "SELECT COALESCE(SUM(coinsEarned), 0) as points FROM task_completions WHERE userId = ? AND status = 'approved'"
+  ).get(user.id) as any;
+  safeUser.points = pointsRow?.points ?? 0;
+  res.json({ token, user: safeUser });
+});
+
 
 router.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
   const user = db.prepare(
@@ -126,6 +159,29 @@ router.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
   ).get(req.userId) as any;
   user.points = pointsRow?.points ?? 0;
   res.json(user);
+});
+
+// Toggle passwordless login mode for a user (admin only)
+router.put('/users/:id/passwordless', authMiddleware, (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { passwordless } = req.body;
+
+  const user = db.prepare('SELECT role FROM users WHERE id = ?').get(req.userId) as any;
+  if (!user || user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin privileges required' });
+  }
+
+  if (passwordless !== 0 && passwordless !== 1) {
+    return res.status(400).json({ error: 'passwordless must be 0 or 1' });
+  }
+
+  const result = db.prepare('UPDATE users SET passwordless = ? WHERE id = ?').run(passwordless, id);
+  
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  res.json({ success: true });
 });
 
 export default router;

@@ -11,6 +11,7 @@ interface LoginUser {
   avatarType: string;
   avatarPreset?: string;
   avatarPhotoUrl?: string;
+  passwordless?: number;
 }
 
 interface LoginProps {
@@ -45,12 +46,25 @@ export function Login({ onLogin, onSwitchToRegister }: LoginProps) {
       .catch(() => {});
   }, []);
 
-  const handleAvatarClick = (user: LoginUser) => {
+  const handleAvatarClick = async (user: LoginUser) => {
     setUsername(user.username);
     setSelectedUser(user.username);
     setError('');
     setPassword('');
-    setTimeout(() => passwordRef.current?.focus(), 50);
+    
+    if (user.passwordless === 1) {
+      setLoading(true);
+      try {
+        const result = await api.loginPasswordless(user.username);
+        localStorage.setItem('tidyquest_token', result.token);
+        window.location.href = '/';
+      } catch (err: any) {
+        setError(err.message || t('auth.loginFailed'));
+        setLoading(false);
+      }
+    } else {
+      setTimeout(() => passwordRef.current?.focus(), 50);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

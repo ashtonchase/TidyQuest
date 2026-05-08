@@ -51,6 +51,7 @@ export function initDatabase() {
       isVacationMode INTEGER NOT NULL DEFAULT 0,
       vacationStartDate TEXT,
       language TEXT NOT NULL DEFAULT 'en',
+      passwordless INTEGER NOT NULL DEFAULT 0,
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -197,6 +198,7 @@ export function initDatabase() {
     `ALTER TABLE tasks ADD COLUMN showInDashboard INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE user_goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
     `ALTER TABLE user_goals ADD COLUMN completedAt TEXT`,
+    `ALTER TABLE users ADD COLUMN passwordless INTEGER NOT NULL DEFAULT 0`,
   ];
 
   for (const sql of migrations) {
